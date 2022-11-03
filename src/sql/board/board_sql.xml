@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="board"> <!-- SQL Mapper는 xml과 어노테이션을 병행해서 사용할 수 있다. xml에서 namespace를 통해 경로(패키지)의 
+		Class를 연결해주면 두가지 설정 정보가 동기화된다. 이때 주의할 점은! id가 중복되면 안된다!! -->
+	<!-- namespace가 이전버전에는 사실 선택사항이었다. 하지만 이제는 패키지경로를 포함한 전체 이름을 가진 구문을 구분하기 
+		위해 필수로 사용해야한다. 네임스페이스는 인터페이스 바인딩을 가능하게 한다. 네임스페이스를 사용하고 자바패키지의 네임스페이스를 두면 
+		코드가 깔끔해지고 마이바티스의 사용성이 크게 향상될 것이다. -->
+
+	<resultMap type="com.spring.board.vo.ComCodeVo" id="comCodeVo">
+		<result property="codeType" column="CODE_TYPE"/> <!-- 필요하네!조회할때 code_type이 menu인것만 불러와야하니까 -->
+		<result property="codeId" column="CODE_ID" />
+		<result property="codeName" column="CODE_NAME" />
+	</resultMap>
+
+	<resultMap type="com.spring.board.vo.BoardVo" id="boardVo">
+		<!-- property:Vo필드명 column:테이블 컬럼명 -->
+		<!-- <result property="codeId" column="CODE_ID" />  a01 a02 a03 a04 --> 
+		<result property="codeName" column="CODE_NAME" /> <!-- 일반 Q&A 익명 자유 -->
+		<result property="boardType" column="BOARD_TYPE" />
+		<result property="boardNum" column="BOARD_NUM" />
+		<result property="boardTitle" column="BOARD_TITLE" />
+		<result property="boardComment" column="BOARD_COMMENT" />
+		<result property="totalCnt" column="TOTAL_CNT" />
+	</resultMap>
+
+	<!-- 근데, TOTAL_CNT는 DB 컬럼명으론 안만들었고, VO에만 존재함...왜? -->
+	<!-- Mybatis 전송매개변수형식 parameterType은 기본유형:int, String, long, Date | 집합유형:배열,목록,지도 
+		| 대상유형:POJO대상 -->
+
+	<select id="codeNameList" parameterType="com.spring.board.vo.ComCodeVo" resultMap="comCodeVo">
+	SELECT
+		CODE_NAME
+		,CODE_ID
+	FROM
+		COM_CODE
+	WHERE
+		CODE_TYPE='menu'
+	</select>
+
+	<select id="boardTotal" parameterType="Integer" resultType="Integer">
+	SELECT
+		COUNT(*) AS TOTAL_CNT
+	FROM
+		BOARD
+	</select>
+	
+	<select id="boardList" parameterType="com.spring.board.vo.PageVo" resultMap="boardVo"> <!-- id는 DAO의 메서드명과 동일 --> <!-- parameterType을 왜 PageVo로 줬을까?->사실상 없어도됨 조회에서는.. paramieterType -->
+	SELECT
+		CODE_NAME
+		,BOARD_TYPE	
+		,BOARD_NUM
+		,BOARD_TITLE
+		,BOARD_COMMENT
+		,TOTAL_CNT
+	FROM
+		(
+		SELECT
+			c.CODE_NAME
+			,b.BOARD_TYPE
+			,b.BOARD_NUM
+			,b.BOARD_TITLE
+			,b.BOARD_COMMENT
+			,ROW_NUMBER() OVER(ORDER BY b.BOARD_NUM DESC) AS NUMROW
+			,COUNT(*) OVER() AS TOTAL_CNT
+		FROM
+			BOARD b
+        JOIN COM_CODE c 
+        ON b.board_type = c.code_id
+	 	<where> <!-- Mybatis의 동적쿼리 사용-->
+			<if test="codeId != null">
+				<foreach collection="codeId" item="codeIdItem" separator="or"> <!-- private String[] codeId; -->
+					CODE_ID = #{codeIdItem}
+				</foreach>
+			</if>
+		</where>
+		)
+	WHERE NUMROW BETWEEN (#{pageNo}-1)*10 + 1 AND (#{pageNo})*10
+	</select>
+	
+
+	<select id="boardView" parameterType="com.spring.board.vo.BoardVo" resultMap="boardVo"> <!-- resultMap은 상단 resultMap의 id이다. resultType="com.spring.board.vo.BoardDetailVo" -->
+	SELECT
+		BOARD_NUM
+		,BOARD_TYPE
+		,BOARD_TITLE
+		,BOARD_COMMENT
+	FROM	
+		BOARD
+	WHERE		
+		BOARD_TYPE = #{boardType}
+		AND 
+		BOARD_NUM = #{boardNum}
+	</select>
+
+	<insert id="boardInsert" parameterType="com.spring.board.vo.BoardVo">
+	INSERT INTO
+		BOARD
+		(BOARD_TYPE
+		,BOARD_NUM
+		,BOARD_TITLE
+		,BOARD_COMMENT
+		,CREATOR
+		,CREATE_TIME
+		,MODIFIER
+		,MODIFIED_TIME
+		)
+	VALUES
+		(#{boardType}
+		,(SELECT NVL(MAX(BOARD_NUM),0)+1 <!-- NVL은 null일때는 1로 저장됩니다. NVL(a,b) : a이면 b로 저장 -->
+				FROM BOARD
+		 	WHERE BOARD_TYPE = #{boardType})  <!-- BOARD_NUM가 BOARD_TYPE 각각에 대해 1부터 매겨지도록 설정 -->
+		,#{boardTitle}
+		,#{boardComment}
+		,'SYSTEM'
+		,TO_CHAR(SYSDATE)
+		,'SYSTEM'
+		,TO_CHAR(SYSDATE)
+		)
+	</insert>
+	
+		<!-- 게시글 삭제 -->
+	<delete id="boardDelete" parameterType="com.spring.board.vo.BoardVo">
+		DELETE
+		FROM BOARD
+		WHERE 
+			BOARD_TYPE = #{boardType}
+			AND
+			BOARD_NUM = #{boardNum}
+	</delete>
+	
+	<!-- 게시글 수정 -->
+	<update id="boardUpdate" parameterType="com.spring.board.vo.BoardVo">
+		UPDATE BOARD
+		SET BOARD_TITLE = #{boardTitle}
+			,BOARD_COMMENT = #{boardComment}
+			,CREATOR = #{creator}
+			,MODIFIED_TIME = TO_CHAR(SYSDATE)
+		WHERE
+			BOARD_TYPE = #{boardType}
+			AND		
+			BOARD_NUM = #{boardNum}		
+	</update>
+</mapper>
